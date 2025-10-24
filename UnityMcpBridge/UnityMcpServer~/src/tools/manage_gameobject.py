@@ -42,12 +42,13 @@ def manage_gameobject(
     layer: Annotated[str, "Layer name"] | None = None,
     components_to_remove: Annotated[list[str],
                                     "List of component names to remove"] | None = None,
-    component_properties: Annotated[dict[str, dict[str, Any]],
+    component_properties: Annotated[dict[str, dict[str, Any]] | str,
                                     """Dictionary of component names to their properties to set. For example:
                                     `{"MyScript": {"otherObject": {"find": "Player", "method": "by_name"}}}` assigns GameObject
                                     `{"MyScript": {"playerHealth": {"find": "Player", "component": "HealthComponent"}}}` assigns Component
                                     Example set nested property:
-                                    - Access shared material: `{"MeshRenderer": {"sharedMaterial.color": [1, 0, 0, 1]}}`"""] | None = None,
+                                    - Access shared material: `{"MeshRenderer": {"sharedMaterial.color": [1, 0, 0, 1]}}`
+                                    Also accepts JSON string format for client compatibility."""] | None = None,
     # --- Parameters for 'find' ---
     search_term: Annotated[str,
                            "Search term for 'find' action ONLY. Use this (not 'name') when searching for GameObjects."] | None = None,
@@ -65,6 +66,43 @@ def manage_gameobject(
                                           "Controls whether serialization of private [SerializeField] fields is included"] | None = None,
 ) -> dict[str, Any]:
     ctx.info(f"Processing manage_gameobject: {action}")
+    
+    # Coerce component_properties to handle both dict and JSON string formats
+    def _coerce_component_properties(value, default=None):
+        if value is None:
+            return default
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            try:
+                import json
+                parsed = json.loads(value)
+                if isinstance(parsed, dict):
+                    return parsed
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return default
+
+    component_properties = _coerce_component_properties(component_properties)
+
+    # Validate component_properties format if provided
+    if component_properties is not None:
+        if not isinstance(component_properties, dict):
+            return {
+                "success": False,
+                "message": f"Invalid component_properties format. Expected dict or JSON string, got {type(component_properties).__name__}. "
+                          f"Example: {{\"MyScript\": {{\"propertyName\": \"value\"}}}}"
+            }
+        
+        # Validate nested structure
+        for comp_name, comp_props in component_properties.items():
+            if not isinstance(comp_props, dict):
+                return {
+                    "success": False,
+                    "message": f"Invalid component_properties structure. Component '{comp_name}' properties must be a dict. "
+                              f"Got {type(comp_props).__name__}. Example: {{\"{comp_name}\": {{\"propertyName\": \"value\"}}}}"
+                }
+
     try:
         # Validate parameter usage to prevent silent failures
         if action == "find":
@@ -84,6 +122,22 @@ def manage_gameobject(
                 return {
                     "success": False,
                     "message": f"For '{action}' action, use 'name' parameter, not 'search_term'."
+                }
+
+        # Validate required target parameter for actions that need it
+        if action in ["modify", "delete", "add_component", "remove_component", "get_components", "get_component"]:
+            if target is None:
+                return {
+                    "success": False,
+                    "message": f"For '{action}' action, 'target' parameter is required. Specify the GameObject to {action}."
+                }
+
+        # Validate required component_name for component-specific actions
+        if action in ["add_component", "remove_component", "get_component"]:
+            if component_name is None:
+                return {
+                    "success": False,
+                    "message": f"For '{action}' action, 'component_name' parameter is required. Specify which component to {action}."
                 }
 
         # Prepare parameters, removing None values
