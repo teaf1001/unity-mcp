@@ -444,7 +444,7 @@ def manage_script(
     ctx: Context,
     action: Annotated[Literal['create', 'read', 'delete'], "Perform CRUD operations on C# scripts."],
     name: Annotated[str, "Script name (no .cs extension)", "Name of the script to create"],
-    path: Annotated[str, "Asset path (default: 'Assets/')", "Path under Assets/ to create the script at, e.g., 'Assets/Scripts/My.cs'"],
+    path: Annotated[str, "Asset path (default: 'Assets/')", "Path under Assets/ to create the script at, e.g., 'Assets/Scripts'"],
     contents: Annotated[str, "Contents of the script to create",
                         "C# code for 'create'/'update'"] | None = None,
     script_type: Annotated[str, "Script type (e.g., 'C#')",
@@ -453,14 +453,81 @@ def manage_script(
 ) -> dict[str, Any]:
     ctx.info(f"Processing manage_script: {action}")
     try:
+        # For read action, use resources/read instead of deprecated manage_script.read
+        if action == 'read':
+            # Construct URI from path and name
+            if path and name:
+                # Handle various path formats
+                if path.endswith('.cs') or path.endswith(f'/{name}.cs') or path.endswith(f'\\{name}.cs'):
+                    # Path contains filename, extract directory and reconstruct
+                    clean_path = os.path.dirname(path).replace('\\', '/').strip('/')
+                    if not clean_path.startswith('Assets/'):
+                        clean_path = f"Assets/{clean_path}" if clean_path else "Assets"
+                    uri = f"unity://path/{clean_path}/{name}.cs"
+                else:
+                    # Path is directory, construct full path
+                    clean_path = path.replace('\\', '/').strip('/')
+                    if not clean_path.startswith('Assets/'):
+                        clean_path = f"Assets/{clean_path}" if clean_path else "Assets"
+                    uri = f"unity://path/{clean_path}/{name}.cs"
+            else:
+                return {"success": False, "message": "Both name and path are required for read action"}
+            
+            # Debug logging
+            ctx.info(f"Constructed URI: '{uri}' from path: '{path}' and name: '{name}'")
+            
+            # Use resources/read with content request
+            from resources import read_resource
+            result = read_resource(ctx, uri, request="read_content")
+            
+            # Transform the result to match manage_script format
+            if isinstance(result, dict) and result.get("success"):
+                data = result.get("data", {})
+                return {
+                    "success": True,
+                    "message": f"Script '{name}.cs' read successfully.",
+                    "data": {
+                        "uri": uri,
+                        "path": uri.replace("unity://path/", ""),
+                        "contents": data.get("text", ""),
+                        "encodedContents": None,
+                        "contentsEncoded": False,
+                    }
+                }
+            return result
+        
+        # Handle path parameter for other actions
+        processed_path = path
+        if path and name:
+            # If path ends with .cs or contains the script name, extract directory
+            if path.endswith('.cs') or path.endswith(f'/{name}.cs') or path.endswith(f'\\{name}.cs'):
+                processed_path = os.path.dirname(path)
+            
+            # Normalize path separators
+            processed_path = processed_path.replace('\\', '/')
+            
+            # Remove Assets/ prefix if present (Unity will add it back)
+            if processed_path.startswith('Assets/'):
+                processed_path = processed_path[7:]
+            
+            # Remove leading/trailing slashes
+            processed_path = processed_path.strip('/')
+            
+            # If empty after processing, use default
+            if not processed_path:
+                processed_path = "Scripts"
+        
         # Prepare parameters for Unity
         params = {
             "action": action,
             "name": name,
-            "path": path,
+            "path": processed_path,
             "namespace": namespace,
             "scriptType": script_type,
         }
+        
+        # Debug logging
+        ctx.info(f"Processed path: '{processed_path}' from original: '{path}'")
 
         # Base64 encode the contents if they exist to avoid JSON escaping issues
         if contents:
