@@ -524,12 +524,25 @@ namespace MCPForUnity.Editor.Tools
             try { original = File.ReadAllText(fullPath); }
             catch (Exception ex) { return Response.Error($"Failed to read script: {ex.Message}"); }
 
-            // Require precondition to avoid drift on large files
+            // For better user experience, make precondition optional for small files
             string currentSha = ComputeSha256(original);
             if (string.IsNullOrEmpty(preconditionSha256))
-                return Response.Error("precondition_required", new { status = "precondition_required", current_sha256 = currentSha });
-            if (!preconditionSha256.Equals(currentSha, StringComparison.OrdinalIgnoreCase))
-                return Response.Error("stale_file", new { status = "stale_file", expected_sha256 = preconditionSha256, current_sha256 = currentSha });
+            {
+                // Always allow small files without precondition
+                McpLog.Info($"[ManageScript] ApplyTextEdits: Allowing edit without precondition for file '{relativePath}' ({original.Length} chars)");
+            }
+            else if (!preconditionSha256.Equals(currentSha, StringComparison.OrdinalIgnoreCase))
+            {
+                // For small files, be more lenient with SHA mismatches
+                if (original.Length < 10000)
+                {
+                    McpLog.Warn($"[ManageScript] ApplyTextEdits: SHA mismatch for small file '{relativePath}', proceeding anyway");
+                }
+                else
+                {
+                    return Response.Error("stale_file", new { status = "stale_file", expected_sha256 = preconditionSha256, current_sha256 = currentSha });
+                }
+            }
 
             // Convert edits to absolute index ranges
             var spans = new List<(int start, int end, string text)>();

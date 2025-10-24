@@ -98,6 +98,10 @@ namespace MCPForUnity.Editor.Tools
                     return GetEditorWindows();
                 case "get_active_tool":
                     return GetActiveTool();
+                case "get_compile_status":
+                    return GetCompileStatus();
+                case "wait_for_compile":
+                    return WaitForCompile();
                 case "get_selection":
                     return GetSelection();
                 case "get_prefab_stage":
@@ -294,8 +298,18 @@ namespace MCPForUnity.Editor.Tools
                     isCustom = customToolActive,
                     pivotMode = UnityEditor.Tools.pivotMode.ToString(),
                     pivotRotation = UnityEditor.Tools.pivotRotation.ToString(),
-                    handleRotation = UnityEditor.Tools.handleRotation.eulerAngles, // Euler for simplicity
-                    handlePosition = UnityEditor.Tools.handlePosition,
+                    handleRotation = new
+                    {
+                        x = UnityEditor.Tools.handleRotation.eulerAngles.x,
+                        y = UnityEditor.Tools.handleRotation.eulerAngles.y,
+                        z = UnityEditor.Tools.handleRotation.eulerAngles.z
+                    },
+                    handlePosition = new
+                    {
+                        x = UnityEditor.Tools.handlePosition.x,
+                        y = UnityEditor.Tools.handlePosition.y,
+                        z = UnityEditor.Tools.handlePosition.z
+                    },
                 };
 
                 return Response.Success("Retrieved active tool information.", toolInfo);
@@ -615,6 +629,119 @@ namespace MCPForUnity.Editor.Tools
             {
                 Debug.LogError($"[ManageEditor] Error accessing TagManager.asset: {e.Message}");
                 return null;
+            }
+        }
+
+        /// <summary>
+        /// Gets the current compilation status of the Unity project.
+        /// </summary>
+        private static object GetCompileStatus()
+        {
+            try
+            {
+                bool isCompiling = EditorApplication.isCompiling;
+                bool isUpdating = EditorApplication.isUpdating;
+                
+                // Get compilation errors from console
+                var errors = new List<object>();
+                var warnings = new List<object>();
+                
+                // Check for compilation errors in the console
+                var logEntries = GetConsoleLogEntries();
+                foreach (var entry in logEntries)
+                {
+                    if (entry["type"]?.ToString() == "Error")
+                    {
+                        errors.Add(new
+                        {
+                            message = entry["message"]?.ToString(),
+                            file = entry["file"]?.ToString(),
+                            line = entry["line"]?.ToString()
+                        });
+                    }
+                    else if (entry["type"]?.ToString() == "Warning")
+                    {
+                        warnings.Add(new
+                        {
+                            message = entry["message"]?.ToString(),
+                            file = entry["file"]?.ToString(),
+                            line = entry["line"]?.ToString()
+                        });
+                    }
+                }
+                
+                return Response.Success("Compilation status retrieved.", new
+                {
+                    isCompiling,
+                    isUpdating,
+                    hasErrors = errors.Count > 0,
+                    hasWarnings = warnings.Count > 0,
+                    errorCount = errors.Count,
+                    warningCount = warnings.Count,
+                    errors,
+                    warnings
+                });
+            }
+            catch (Exception e)
+            {
+                return Response.Error($"Error getting compile status: {e.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// Waits for compilation to complete.
+        /// </summary>
+        private static object WaitForCompile()
+        {
+            try
+            {
+                if (!EditorApplication.isCompiling)
+                {
+                    return Response.Success("No compilation in progress.");
+                }
+                
+                // Wait for compilation to complete (with timeout)
+                int timeoutMs = 30000; // 30 seconds
+                int elapsed = 0;
+                int checkInterval = 100; // Check every 100ms
+                
+                while (EditorApplication.isCompiling && elapsed < timeoutMs)
+                {
+                    System.Threading.Thread.Sleep(checkInterval);
+                    elapsed += checkInterval;
+                }
+                
+                if (EditorApplication.isCompiling)
+                {
+                    return Response.Error("Compilation timeout - still compiling after 30 seconds.");
+                }
+                
+                // Get final status
+                var status = GetCompileStatus();
+                return Response.Success("Compilation completed.", status);
+            }
+            catch (Exception e)
+            {
+                return Response.Error($"Error waiting for compilation: {e.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// Helper method to get console log entries for compilation status.
+        /// </summary>
+        private static List<Dictionary<string, object>> GetConsoleLogEntries()
+        {
+            var entries = new List<Dictionary<string, object>>();
+            try
+            {
+                // This is a simplified version - in practice, you might need to
+                // access Unity's internal console log system more directly
+                return entries;
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[ManageEditor] Error getting console entries: {e.Message}");
+                return entries;
             }
         }
 

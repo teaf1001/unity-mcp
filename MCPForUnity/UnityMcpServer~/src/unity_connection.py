@@ -295,7 +295,9 @@ class UnityConnection:
                     restore_timeout = None
                     if attempt > 0 and last_short_timeout is None:
                         restore_timeout = self.sock.gettimeout()
-                        self.sock.settimeout(1.0)
+                        # Use longer timeout for script validation operations
+                        timeout_duration = 30.0 if command_type in ['validate_script', 'manage_script'] else 1.0
+                        self.sock.settimeout(timeout_duration)
                     try:
                         response_data = self.receive_full_response(self.sock)
                         with contextlib.suppress(Exception):

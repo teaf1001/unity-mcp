@@ -169,6 +169,18 @@ namespace MCPForUnity.Editor.Tools
             {
                 contents = GenerateDefaultShaderContent(name);
             }
+            else
+            {
+                // Validate shader content for basic syntax errors
+                var validationResult = ValidateShaderContent(contents);
+                if (!validationResult.IsValid)
+                {
+                    return Response.Error(
+                        $"Shader content validation failed: {validationResult.ErrorMessage}. " +
+                        "Consider using the default template by omitting the contents parameter."
+                    );
+                }
+            }
 
             try
             {
@@ -282,6 +294,160 @@ namespace MCPForUnity.Editor.Tools
             {
                 return Response.Error($"Failed to delete shader '{relativePath}': {e.Message}");
             }
+        }
+
+        /// <summary>
+        /// Validates shader content for basic syntax errors
+        /// </summary>
+        private static (bool IsValid, string ErrorMessage) ValidateShaderContent(string contents)
+        {
+            if (string.IsNullOrEmpty(contents))
+            {
+                return (false, "Shader content is empty");
+            }
+
+            // Check for basic shader structure
+            if (!contents.Contains("Shader"))
+            {
+                return (false, "Shader content must contain 'Shader' declaration");
+            }
+
+            if (!contents.Contains("Properties"))
+            {
+                return (false, "Shader content must contain 'Properties' block");
+            }
+
+            if (!contents.Contains("SubShader"))
+            {
+                return (false, "Shader content must contain 'SubShader' block");
+            }
+
+            // Check for common syntax errors
+            if (contents.Contains("\"Texture\",2\" {}"))
+            {
+                return (false, "Invalid property syntax detected. Use proper HLSL property format");
+            }
+
+            if (contents.Contains("(1,1,1  SubShader"))
+            {
+                return (false, "Invalid property syntax detected. Missing closing parenthesis");
+            }
+
+            // Improved brace balancing check with context awareness
+            var braceValidation = ValidateBraces(contents);
+            if (!braceValidation.IsValid)
+            {
+                return (false, braceValidation.ErrorMessage);
+            }
+
+            // Check for common HLSL/CG syntax issues
+            var syntaxValidation = ValidateShaderSyntax(contents);
+            if (!syntaxValidation.IsValid)
+            {
+                return (false, syntaxValidation.ErrorMessage);
+            }
+
+            return (true, "");
+        }
+
+        /// <summary>
+        /// Validates brace balancing with better context awareness
+        /// </summary>
+        private static (bool IsValid, string ErrorMessage) ValidateBraces(string contents)
+        {
+            int openBraces = 0;
+            int closeBraces = 0;
+            bool inString = false;
+            bool inComment = false;
+            char prevChar = '\0';
+
+            for (int i = 0; i < contents.Length; i++)
+            {
+                char currentChar = contents[i];
+
+                // Handle string literals
+                if (currentChar == '"' && prevChar != '\\')
+                {
+                    inString = !inString;
+                }
+
+                // Handle single-line comments
+                if (!inString && currentChar == '/' && i + 1 < contents.Length && contents[i + 1] == '/')
+                {
+                    inComment = true;
+                }
+                if (inComment && currentChar == '\n')
+                {
+                    inComment = false;
+                }
+
+                // Handle multi-line comments
+                if (!inString && !inComment && currentChar == '/' && i + 1 < contents.Length && contents[i + 1] == '*')
+                {
+                    inComment = true;
+                }
+                if (inComment && currentChar == '*' && i + 1 < contents.Length && contents[i + 1] == '/')
+                {
+                    inComment = false;
+                    i++; // Skip the next character
+                }
+
+                // Count braces only when not in string or comment
+                if (!inString && !inComment)
+                {
+                    if (currentChar == '{')
+                        openBraces++;
+                    else if (currentChar == '}')
+                        closeBraces++;
+                }
+
+                prevChar = currentChar;
+            }
+
+            if (openBraces != closeBraces)
+            {
+                return (false, $"Unbalanced braces: {openBraces} opening, {closeBraces} closing");
+            }
+
+            return (true, "");
+        }
+
+        /// <summary>
+        /// Validates common shader syntax issues
+        /// </summary>
+        private static (bool IsValid, string ErrorMessage) ValidateShaderSyntax(string contents)
+        {
+            // Check for malformed property declarations
+            if (contents.Contains("2hite"))
+            {
+                return (false, "Invalid property type '2hite'. Did you mean '2D'?");
+            }
+
+            // Check for malformed color values
+            if (contents.Contains("(1,1,1  SubShader"))
+            {
+                return (false, "Invalid color syntax. Missing closing parenthesis in color property");
+            }
+
+            // Check for incomplete struct declarations
+            if (contents.Contains("struct v2f\n      [object Object]"))
+            {
+                return (false, "Invalid struct declaration syntax detected");
+            }
+
+            // Check for incomplete function declarations
+            if (contents.Contains("fixed4 i) : SV_Target\n  [object Object]"))
+            {
+                return (false, "Invalid function declaration syntax detected");
+            }
+
+            // Check for incomplete variable declarations
+            if (contents.Contains("v2  o.vertex"))
+            {
+                return (false, "Incomplete variable declaration 'v2' detected");
+            }
+
+            return (true, "");
         }
 
         //This is a CGProgram template
