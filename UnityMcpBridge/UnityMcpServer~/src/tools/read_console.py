@@ -14,8 +14,7 @@ from unity_connection import send_command_with_retry
 def read_console(
     ctx: Context,
     action: Annotated[Literal['get', 'clear'], "Get or clear the Unity Editor console."],
-    types: Annotated[list[Literal['error', 'warning',
-                                  'log', 'all']], "Message types to get"] | None = None,
+    types: Annotated[list[str] | str, "Message types to get (accepts list or comma/space separated string)"] | None = None,
     count: Annotated[int, "Max messages to return"] | None = None,
     filter_text: Annotated[str, "Text filter for messages"] | None = None,
     since_timestamp: Annotated[str,
@@ -28,9 +27,52 @@ def read_console(
     ctx.info(f"Processing read_console: {action}")
     # Set defaults if values are None
     action = action if action is not None else 'get'
-    types = types if types is not None else ['error', 'warning', 'log']
     format = format if format is not None else 'detailed'
-    include_stacktrace = include_stacktrace if include_stacktrace is not None else True
+    # Coerce booleans defensively (strings like 'true'/'false')
+    def _coerce_bool(value, default=None):
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            v = value.strip().lower()
+            if v in ("true", "1", "yes", "on"):
+                return True
+            if v in ("false", "0", "no", "off"):
+                return False
+        return bool(value)
+
+    include_stacktrace = _coerce_bool(include_stacktrace, True)
+
+    # Normalise and validate log types while being tolerant of client variations.
+    def _normalize_types(raw_types):
+        ordered_allowed = ["error", "warning", "log", "exception", "assert"]
+        allowed = set(ordered_allowed)
+        default_types = ordered_allowed[:3]
+        if raw_types is None:
+            return default_types
+        if isinstance(raw_types, str):
+            candidates = [part for part in raw_types.replace(",", " ").split() if part]
+        else:
+            candidates = []
+            for item in raw_types:
+                if isinstance(item, str):
+                    candidates.extend([part for part in item.replace(",", " ").split() if part])
+                else:
+                    candidates.append(str(item))
+        normalized: list[str] = []
+        for candidate in candidates:
+            lowered = candidate.strip().lower()
+            if not lowered:
+                continue
+            if lowered == "all":
+                # Expand 'all' to every supported log category in a consistent order.
+                return ordered_allowed
+            if lowered in allowed and lowered not in normalized:
+                normalized.append(lowered)
+        return normalized or default_types
+
+    types = _normalize_types(types)
 
     # Normalize action if it's a string
     if isinstance(action, str):
