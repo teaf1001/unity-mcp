@@ -21,12 +21,12 @@ def manage_gameobject(
                    "Tag name - used for both 'create' (initial tag) and 'modify' (change tag)"] | None = None,
     parent: Annotated[str,
                       "Parent GameObject reference - used for both 'create' (initial parent) and 'modify' (change parent)"] | None = None,
-    position: Annotated[list[float],
-                        "Position - used for both 'create' (initial position) and 'modify' (change position)"] | None = None,
-    rotation: Annotated[list[float],
-                        "Rotation - used for both 'create' (initial rotation) and 'modify' (change rotation)"] | None = None,
-    scale: Annotated[list[float],
-                     "Scale - used for both 'create' (initial scale) and 'modify' (change scale)"] | None = None,
+    position: Annotated[list[float] | str,
+                        "Position - [x,y,z] or string '[x,y,z]' for client compatibility"] | None = None,
+    rotation: Annotated[list[float] | str,
+                        "Rotation - [x,y,z] or string '[x,y,z]' for client compatibility"] | None = None,
+    scale: Annotated[list[float] | str,
+                     "Scale - [x,y,z] or string '[x,y,z]' for client compatibility"] | None = None,
     components_to_add: Annotated[list[str],
                                  "List of component names to add"] | None = None,
     primitive_type: Annotated[str,
@@ -85,6 +85,34 @@ def manage_gameobject(
 
     component_properties = _coerce_component_properties(component_properties)
 
+    # Coercers to tolerate stringified vectors (for compatibility with MCPForUnity version)
+    def _coerce_vec(value, default=None):
+        if value is None:
+            return default
+        import math
+        def _to_vec3(parts):
+            try:
+                vec = [float(parts[0]), float(parts[1]), float(parts[2])]
+            except (ValueError, TypeError):
+                return default
+            return vec if all(math.isfinite(n) for n in vec) else default
+        if isinstance(value, list) and len(value) == 3:
+            return _to_vec3(value)
+        if isinstance(value, str):
+            s = value.strip()
+            # minimal tolerant parse for "[x,y,z]" or "x,y,z"
+            if s.startswith("[") and s.endswith("]"):
+                s = s[1:-1]
+            # support "x,y,z" and "x y z"
+            parts = [p.strip() for p in (s.split(",") if "," in s else s.split())]
+            if len(parts) == 3:
+                return _to_vec3(parts)
+        return default
+
+    position = _coerce_vec(position, default=position)
+    rotation = _coerce_vec(rotation, default=rotation)
+    scale = _coerce_vec(scale, default=scale)
+
     # Validate component_properties format if provided
     if component_properties is not None:
         if not isinstance(component_properties, dict):
@@ -139,6 +167,19 @@ def manage_gameobject(
                     "success": False,
                     "message": f"For '{action}' action, 'component_name' parameter is required. Specify which component to {action}."
                 }
+
+        # Validate list parameters format
+        if components_to_add is not None and not isinstance(components_to_add, list):
+            return {
+                "success": False,
+                "message": f"Invalid components_to_add format. Expected list, got {type(components_to_add).__name__}. Example: ['Rigidbody', 'Collider']"
+            }
+
+        if components_to_remove is not None and not isinstance(components_to_remove, list):
+            return {
+                "success": False,
+                "message": f"Invalid components_to_remove format. Expected list, got {type(components_to_remove).__name__}. Example: ['Rigidbody', 'Collider']"
+            }
 
         # Prepare parameters, removing None values
         params = {
